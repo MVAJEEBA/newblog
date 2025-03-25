@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html>
+{% load static %}
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="{% static 'style.css' %}" />
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        /* Modal Styles */
+        .modal {
+            display: none; /* Hidden by default */
+            position: fixed;
+            z-index: 1;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgb(0,0,0);
+            background-color: rgba(0,0,0,0.4);
+        }
+
+        /* Modal Content */
+        .modal-content {
+            background-color: #fefefe;
+            margin: 15% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 80%;
+        }
+
+        /* Close Button */
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+        }
+
+        .close:hover,
+        .close:focus {
+            color: black;
+            text-decoration: none;
+            cursor: pointer;
+        }
+
+        .form-input {
+            margin: 10px 0;
+            padding: 10px;
+            width: 100%;
+        }
+
+        /* Pagination styles */
+        .pagination button {
+            padding: 5px 10px;
+            margin: 5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h1>Blog List</h1>
+
+    <label for="statusFilter">Filter by Status:</label>
+    <select id="statusFilter">
+        <option value="">All</option>
+        <option value="draft">Draft</option>
+        <option value="published">Published</option>
+    </select>
+    <input type="text" id="myInput" onkeyup="myFunction()" placeholder="Search for title." title="Type in a name">
+
+    <!-- Add New Button -->
+    <button id="addNewBtn">Add New Blog</button>
+    
+    <!-- Table Container -->
+    <div class="table-container">
+        <table id="blog-table" border="1" cellpadding="10" cellspacing="0" style="width: 100%; border-collapse: collapse; text-align: left;">
+            <thead>
+                <tr>
+                    <th>Title</th>
+                    <th>Content</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="blog-posts">
+                <!-- Blog posts will be populated here dynamically -->
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Add New Blog Modal -->
+    <div id="addNewModal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2 id="modalTitle">Add New Blog</h2>
+            <form id="addNewForm">
+                <label for="addTitle">Title</label>
+                <input type="text" id="addTitle" class="form-input" required />
+                <label for="addContent">Content</label>
+                <textarea id="addContent" class="form-input" required></textarea>
+                <label for="addStatus">Status</label>
+                <select id="addStatus" class="form-input" required>
+                    <option value="draft">Draft</option>
+                    <option value="published">Published</option>
+                </select>
+                <button type="submit" id="formSubmitBtn">Add</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="pagination"></div> 
+
+    <script>
+        $(document).ready(function() {
+            var token = localStorage.getItem('access_token');
+            var refreshToken = localStorage.getItem('refresh_token');
+            var currentBlogId = null;
+            var currentPage = 1;
+
+            // Ensure token is present, otherwise redirect to login
+            if (!token) {
+                window.location.href = "/login";  
+                return;
+            }
+        
+            // Handle filter change
+            $('#statusFilter').change(function() {
+                fetchBlogs(token, $(this).val());
+            });
+        
+            // Open modal for adding new blog
+            $('#addNewBtn').click(function() {
+                currentBlogId = null;
+                $('#addTitle').val('');
+                $('#addContent').val('');
+                $('#addStatus').val('draft');
+                $('#modalTitle').text('Add New Blog');
+                $('#formSubmitBtn').text('Add');
+                $('#addNewModal').show();
+            });
+        
+            // Close modal
+            $('.close').click(function() {
+                $('#addNewModal').hide();
+            });
+        
+            // Submit form to add/edit blog
+            $('#addNewForm').submit(function(event) {
+                event.preventDefault();
+                var title = $('#addTitle').val();
+                var content = $('#addContent').val();
+                var status = $('#addStatus').val();
+                var url = currentBlogId ? `/api/posts/${currentBlogId}/` : '/api/posts/';
+                var method = currentBlogId ? 'PUT' : 'POST';
+        
+                $.ajax({
+                    url: url,
+                    type: method,
+                    headers: {
+                        "Authorization": "Bearer " + token
+                    },
+                    data: JSON.stringify({
+                        title: title,
+                        content: content,
+                        status: status
+                    }),
+                    contentType: "application/json",
+                    success: function(response) {
+                        console.log("Blog saved:", response);
+                        $('#addNewModal').hide();
+                        alert("Post Added Successfully");
+                        fetchBlogs(token); 
+                    },
+                    error: function(error) {
+                        console.error("Error saving blog:", error);
+                    }
+                });
+            });
+        
+            // Edit button click
+            $(document).on('click', '.edit-btn', function() {
+                currentBlogId = $(this).data('id');
+                var row = $(this).closest('tr');
+                var title = row.find('td').eq(0).text();
+                var content = row.find('td').eq(1).text();
+                var status = row.find('td').eq(2).text();
+        
+                $('#addTitle').val(title);
+                $('#addContent').val(content);
+                $('#addStatus').val(status);
+                $('#modalTitle').text('Edit Blog');
+                $('#formSubmitBtn').text('Update');
+                $('#addNewModal').show();
+            });
+        
+            // Delete button click
+            $(document).on('click', '.delete-btn', function() {
+                var blogId = $(this).data('id');
+                if (confirm("Are you sure you want to delete this blog post?")) {
+                    $.ajax({
+                        url: `/api/posts/${blogId}/`,
+                        type: 'DELETE',
+                        headers: {
+                            "Authorization": "Bearer " + token
+                        },
+                        success: function(response) {
+                            console.log("Blog deleted:", response);
+                            alert("Post Deleted Successfully");
+                            fetchBlogs(token);  // Refresh the blog list after deletion
+                        },
+                        error: function(error) {
+                            console.error("Error deleting blog:", error);
+                        }
+                    });
+                }
+            });
+        
+            // Fetch blogs with pagination
+            function fetchBlogs(token, statusFilter = '', page = 1) {
+                var url = `/api/posts/?page=${page}`;
+                if (statusFilter) {
+                    url += `&status=${statusFilter}`;
+                }
+        
+                $.ajax({
+                    url: url,
+                    type: "GET",
+                    headers: {
+                        "Authorization": "Bearer " + token
+                    },
+                    success: function(data) {
+                        console.log("Blog Data:", data);
+                        var blogPostsHtml = '';
+                        if (data && Array.isArray(data.results)) {
+                            data.results.forEach(function(blogPost) {
+                                blogPostsHtml += `<tr class="blog-row" data-id="${blogPost.id}">
+                                                        <td>${blogPost.title}</td>
+                                                        <td>${blogPost.content}</td>
+                                                        <td>${blogPost.status}</td>
+                                                        <td>
+                                                            <button class="edit-btn" data-id="${blogPost.id}">Edit</button>
+                                                            <button class="delete-btn" data-id="${blogPost.id}">Delete</button>
+                                                        </td>
+                                                    </tr>`;
+                            });
+        
+                            var paginationHtml = '';
+                            if (data.previous) {
+                                paginationHtml += `<button id="prevPageBtn">Previous</button>`;
+                            }
+                            if (data.next) {
+                                paginationHtml += `<button id="nextPageBtn">Next</button>`;
+                            }
+                            $('#pagination').html(paginationHtml);
+                        } else {
+                            blogPostsHtml = "<tr><td colspan='4'>No blogs found.</td></tr>";
+                        }
+                        $('#blog-posts').html(blogPostsHtml);
+                    },
+                    error: function(error) {
+                        if (error.status === 401) {
+                            console.log("Unauthorized, refreshing token...");
+                            refreshTokenHandler();
+                        } else {
+                            console.error("Failed to fetch blogs:", error);
+                        }
+                    }
+                });
+            }
+        
+            // Handle page navigation (prev/next)
+            $(document).on('click', '#prevPageBtn', function() {
+                if (currentPage > 1) {
+                    currentPage--;
+                    fetchBlogs(token, $('#statusFilter').val(), currentPage);
+                }
+            });
+        
+            $(document).on('click', '#nextPageBtn', function() {
+                currentPage++;
+                fetchBlogs(token, $('#statusFilter').val(), currentPage);
+            });
+        
+            // Token refresh handler
+            function refreshTokenHandler() {
+                $.ajax({
+                    url: "{% url 'login_api' %}",
+                    type: 'POST',
+                    data: JSON.stringify({ 'refresh_token': refreshToken }),
+                    contentType: 'application/json',
+                    success: function(response) {
+                        localStorage.setItem('access_token', response.access_token);
+                        localStorage.setItem('refresh_token', response.refresh_token);
+                        token = response.access_token; // Update token variable
+                        fetchBlogs(token);
+                    },
+                    error: function(error) {
+                        console.error("Token refresh failed:", error);
+                        alert('Session expired. Please log in again.');
+                        window.location.href = '/login';
+                    }
+                });
+            }
+        
+            // Initial Fetch
+            fetchBlogs(token);
+        });
+
+        // Search function
+        function myFunction() {
+            var input, filter, table, tr, td, i, txtValue;
+            input = document.getElementById("myInput");
+            filter = input.value.toUpperCase();
+            table = document.getElementById("blog-table");
+            tr = table.getElementsByTagName("tr");
+            for (i = 0; i < tr.length; i++) {
+                td = tr[i].getElementsByTagName("td")[0];  // Search based on title column
+                if (td) {
+                    txtValue = td.textContent || td.innerText;
+                    if (txtValue.toUpperCase().indexOf(filter) > -1) {
+                        tr[i].style.display = "";
+                    } else {
+                        tr[i].style.display = "none";  // Hide non-matching rows
+                    }
+                }
+            }
+        }
+    </script>
+</body>
+</html>

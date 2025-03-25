@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html>
+{% load static %}
+
+<head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="{% static 'style.css' %}" />
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body>
+    <div class="topnav">
+        <a class="active" href="{% url 'index' %}">Home</a>
+        <a id="blogListLink" href="{% url 'blogers_list' %}" onclick="sendTokenAndNavigate(event)">My Creation</a>
+        <a href="{% url 'logout' %}" onclick="logoutAndClearStorage()">Logout</a>
+        <a href="#about">About</a>
+    </div>
+
+    <h1>Blog List</h1>
+
+    <!-- Add New Button -->
+    <button id="addNewBtn">Add New Blog</button>
+
+    <div class="pagination" id="pagination"></div>
+
+    <input type="text" id="myInput" onkeyup="myFunction()" placeholder="Search for title." title="Type in a name">
+
+    <!-- Table Container -->
+    <table id="blog-table" border="1" cellpadding="10" cellspacing="0" style="width: 100%; border-collapse: collapse; text-align: left;">
+        <thead>
+            <tr>
+                <th>Title</th>
+                <th>Content</th>
+                <th>Status</th>
+                <th>Created_at</th>
+                <th>Updated By</th>
+                <th>Created By</th>
+            </tr>
+        </thead>
+        <tbody id="blog-posts"></tbody>
+    </table>
+
+    <script>
+        // Function to check if the JWT token is expired
+        function isTokenExpired(token) {
+            if (!token) return true;
+
+            const payload = JSON.parse(atob(token.split('.')[1])); // Decode the token
+            const currentTime = Math.floor(Date.now() / 1000); // Current time in seconds
+
+            return payload.exp < currentTime; // Check expiration time
+        }
+
+        // Function to refresh the access token using the refresh token
+        function refreshTokenHandler(page) {
+            let refreshToken = localStorage.getItem('refresh_token'); // Get the refresh token from localStorage
+           
+            if (!refreshToken) {
+                alert("Session expired. Please log in again.");
+                window.location.href = "/login";
+                return;
+            }
+
+            // Request to refresh the token
+            $.ajax({
+                url: "{% url 'login_api' %}",  // Refresh token API endpoint
+                type: 'POST',
+                data: JSON.stringify({ 'refresh_token': refreshToken }), // Send refresh token
+                contentType: 'application/json',
+                success: function(response) {
+                    // Store the new access token and refresh token in localStorage
+                    localStorage.setItem('access_token', response.access_token);
+                    localStorage.setItem('refresh_token', response.refresh_token);
+                    console.log("Tokens refreshed!");
+                    fetchBlogs(page); // Retry fetching blogs after refreshing the token
+                },
+                error: function(error) {
+                    console.error("Token refresh failed:", error);
+                    alert('Session expired. Please log in again.');
+                    window.location.href = '/login';
+                }
+            });
+        }
+
+        // Function to fetch blogs from the API
+        function fetchBlogs(page = 1) {
+            let token = localStorage.getItem('access_token');  // Get the JWT token from localStorage
+            if (!token) {
+                console.log("No access token found!");
+            } else {
+                console.log("Access token found:", token);
+            }
+
+            if (!token || isTokenExpired(token)) {
+                console.log("Token expired, refreshing...");
+                refreshTokenHandler(page); // Refresh the token if it's expired
+                return; // Exit and wait for token refresh
+            }
+
+            $.ajax({
+                url: "{% url 'blog_list_view' %}?page=" + page,  // URL of your BlogListView API
+                method: 'GET',
+                headers: { 
+                    'Authorization': 'Bearer ' + token  // Send token in the Authorization header
+                   
+                },
+                success: function (data) {
+                    console.log('Fetched blogs:', data);
+                    renderBlogs(data.blogs);  // Render the blogs
+                    renderPagination(data.current_page, data.total_pages);  // Render pagination
+                },
+                error: function (xhr, status, error) {
+                    if (xhr.status === 401) {
+                        console.log('Unauthorized access, refreshing token...');
+                        refreshTokenHandler(page); // Try refreshing the token
+                    } else {
+                        console.error('Error fetching blogs:', error);
+                        alert("Error fetching blogs. Please try again.");
+                    }
+                }
+            });
+        }
+
+        // Function to render the blogs in the table
+        function renderBlogs(blogs) {
+            const tableBody = $("#blog-posts");
+            tableBody.empty();  // Clear existing rows
+
+            blogs.forEach(function (blog) {
+                const row = `<tr>
+                    <td>${blog.title}</td>
+                    <td>${blog.content}</td>
+                    <td>${blog.status}</td>
+                    <td>${blog.created_at}</td>
+                    <td>${blog.updated_at}</td>
+                    <td>${blog.author}</td>
+                </tr>`;
+                tableBody.append(row);
+            });
+        }
+
+        // Function to render pagination controls
+        function renderPagination(currentPage, totalPages) {
+            const paginationDiv = $('#pagination');
+            paginationDiv.empty();
+
+            if (currentPage > 1) {
+                paginationDiv.append(`<a href="#" onclick="fetchBlogs(1)">« First</a>`);
+                paginationDiv.append(`<a href="#" onclick="fetchBlogs(${currentPage - 1})">Previous</a>`);
+            }
+
+            paginationDiv.append(`<span>Page ${currentPage} of ${totalPages}</span>`);
+
+            if (currentPage < totalPages) {
+                paginationDiv.append(`<a href="#" onclick="fetchBlogs(${currentPage + 1})">Next</a>`);
+                paginationDiv.append(`<a href="#" onclick="fetchBlogs(${totalPages})">Last »</a>`);
+            }
+        }
+
+        // Initial call to fetch blogs when the page loads
+        fetchBlogs();
+
+        // Handle search functionality
+        function myFunction() {
+            var input, filter, table, tr, td, i, txtValue;
+            input = document.getElementById("myInput");
+            filter = input.value.toUpperCase();
+            table = document.getElementById("blog-table");
+            tr = table.getElementsByTagName("tr");
+            for (i = 0; i < tr.length; i++) {
+                td = tr[i].getElementsByTagName("td")[0];  // Search based on the title column
+                if (td) {
+                    txtValue = td.textContent || td.innerText;
+                    if (txtValue.toUpperCase().indexOf(filter) > -1) {
+                        tr[i].style.display = "";
+                    } else {
+                        tr[i].style.display = "none";
+                    }
+                }
+            }
+        }
+
+        // Logout and clear localStorage
+        function logoutAndClearStorage() {
+            localStorage.removeItem('access_token');
+            localStorage.removeItem('refresh_token');
+            console.log("LocalStorage cleared!");
+            window.location.href = "{% url 'login' %}";
+        }
+    </script>
+</body>
+</html>
